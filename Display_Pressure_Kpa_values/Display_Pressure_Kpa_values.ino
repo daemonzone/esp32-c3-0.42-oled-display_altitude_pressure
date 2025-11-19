@@ -51,7 +51,7 @@ HX711_ADC hxSensor(HX_DOUT, HX_SCK);
 // --------------------
 unsigned long previousMillis = 0;
 const unsigned long interval = 5000; // update every 5s
-long rawZero = 0;                     // baseline at 235 m
+float rawZero = 0.0;                     // baseline at 235 m
 const float P0 = 101.3;               // sea-level reference in kPa
 const float currentAltitudeSLM = 235; // meters
 
@@ -132,29 +132,22 @@ int value = 0;
 
 String deviceId;
 
-// Returns a 64-bit device ID based on the Wi-Fi MAC address
+// Returns a device ID based on the Wi-Fi MAC address
 String getChipId() {
-  // Ensure Wi-Fi MAC is initialized
-  if (WiFi.getMode() == WIFI_MODE_NULL) {
-    WiFi.mode(WIFI_MODE_STA);
-    delay(10);
-  }
+    // Ensure Wi-Fi is initialized
+    if (WiFi.getMode() == WIFI_MODE_NULL) {
+        WiFi.mode(WIFI_MODE_STA);
+        delay(10);
+    }
 
-  String mac = WiFi.macAddress(); // "20:6E:F1:6A:C6:64"
-  uint64_t id = 0;
-  int index = 0;
+    uint8_t mac[6];
+    WiFi.macAddress(mac);
 
-  for (int i = 0; i < 6; i++) {
-    String byteStr = mac.substring(index, index + 2);
-    id = (id << 8) | strtoul(byteStr.c_str(), nullptr, 16);
-    index += 3; // skip colon
-  }
+    // Take only the last 3 bytes of MAC
+    char buf[7]; // 6 hex digits + null
+    sprintf(buf, "%02x%02x%02x", mac[3], mac[4], mac[5]); // lowercase hex
 
-  // Convert to lowercase hex string
-  char buf[17]; // 16 hex digits + null
-  sprintf(buf, "%016llx", id);
-
-  return String("esp32-") + buf;
+    return String("esp32c3-") + String(buf);
 }
 
 void publishStatus() {
@@ -181,6 +174,8 @@ void publishStatus() {
     }  
   }
 
+  printOnDisplay(pressure, altitude);
+
   char buf[512];
   serializeJson(status, buf);
 
@@ -191,18 +186,28 @@ void publishStatus() {
     Serial.printf("[%s] Failed to send up status\n", deviceId.c_str());
   }
 
-  printOnDisplay(pressure, altitude);
 }
 
 // --------------------
 // Function to get pressure in kPa
 // --------------------
 float getPressure() {
-    long raw = hxSensor.getData();
-    long delta = raw - rawZero;
+    // Take multiple readings to smooth out noise
+    const int N = 10;      // number of readings to average
+    float sumRaw = 0;
 
-    const float SCALE = 40.0 / 8388607.0; // ΔkPa per count
+    for (int i = 0; i < N; i++) {
+        hxSensor.update();
+        sumRaw += hxSensor.getData();
+        delay(10);          // small delay between reads
+    }
+
+    float avgRaw = sumRaw / N;
+    float delta = avgRaw - rawZero;
+
+    const float SCALE = 40.0 / 8388607.0; // kPa per count
     float pressure_kPa = P0 + delta * SCALE;
+
     return pressure_kPa;
 }
 
@@ -222,9 +227,9 @@ unsigned long getAliveSeconds() {
 void printOnDisplay(float pressure, float altitude) {
         // Serial output
         Serial.print("Altitude: ");
-        Serial.print(altitude, 1);
+        Serial.print(altitude, 7);
         Serial.print(" m | Pressure: ");
-        Serial.print(pressure, 2);
+        Serial.print(pressure, 7);
         Serial.println(" kPa");
 
         // Display on OLED (same as your code, using altitude and pressure)
