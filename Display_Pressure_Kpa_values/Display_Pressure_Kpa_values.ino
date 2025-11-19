@@ -237,7 +237,7 @@ void printOnDisplay(float pressure, float altitude) {
 
         // Altitude line
         char bufAlt[10];
-        sprintf(bufAlt, "%d", (int)altitude);
+        sprintf(bufAlt, "%d", (int)round(altitude));
         oled.setFont(u8g2_font_fub20_tr);
         int wNum = oled.getStrWidth(bufAlt);
         oled.setFont(u8g2_font_7x14_tr);
