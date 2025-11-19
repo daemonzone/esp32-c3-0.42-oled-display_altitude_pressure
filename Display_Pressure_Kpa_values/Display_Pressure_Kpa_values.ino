@@ -25,13 +25,48 @@ HX711_ADC hxSensor(HX_DOUT, HX_SCK);
 // Variables
 // --------------------
 unsigned long previousMillis = 0;
-const unsigned long interval = 1000; // update every 1s
+const unsigned long interval = 5000; // update every 5s
 long rawZero = 0;                     // baseline at 235 m
 const float P0 = 101.3;               // sea-level reference in kPa
 const float currentAltitudeSLM = 235; // meters
 
+// Returns a 64-bit device ID based on the Wi-Fi MAC address
+String getDeviceID() {
+  // Ensure Wi-Fi MAC is initialized
+  if (WiFi.getMode() == WIFI_MODE_NULL) {
+    WiFi.mode(WIFI_MODE_STA);
+    delay(10);
+  }
+
+  String mac = WiFi.macAddress(); // "20:6E:F1:6A:C6:64"
+  uint64_t id = 0;
+  int index = 0;
+
+  for (int i = 0; i < 6; i++) {
+    String byteStr = mac.substring(index, index + 2);
+    id = (id << 8) | strtoul(byteStr.c_str(), nullptr, 16);
+    index += 3; // skip colon
+  }
+
+  // Convert to lowercase hex string
+  char buf[17]; // 16 hex digits + null
+  sprintf(buf, "%016llx", id);
+
+  String deviceID = "esp32-";
+  deviceID += buf;
+
+  return deviceID;
+}
+
 void setup() {
   Serial.begin(115200);
+  while(!Serial); // wait for Serial to be ready (important for native USB)
+  Serial.println("ESP32-C3 Serial OK"); 
+
+  String deviceID = getDeviceID();
+  Serial.print("Device ID: ");
+  Serial.println(deviceID);
+
   Wire.begin(OLED_SDA, OLED_SCL);
   oled.begin();
   oled.clearBuffer();
@@ -46,7 +81,7 @@ void setup() {
   delay(2000);
   hxSensor.update();
   rawZero = hxSensor.getData();
-  Serial.print("Baseline raw value (284 m): ");
+  Serial.printf("Baseline raw value (%d m): ", (int)currentAltitudeSLM);
   Serial.println(rawZero);
   Serial.println("HX710B ready!");
 }
@@ -114,7 +149,7 @@ void loop() {
     // --------------------
 
     char bufP[16];
-    sprintf(bufP, "%.1f kPa", pressure_kPa);
+    sprintf(bufP, "%.2f kPa", pressure_kPa);
 
     // Set font before measuring
     oled.setFont(u8g2_font_7x14_tr);
