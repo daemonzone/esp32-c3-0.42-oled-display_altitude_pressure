@@ -358,9 +358,9 @@ void reconnect() {
 
 void setup() {
   Serial.begin(115200);
-  while(!Serial); // wait for Serial to be ready (important for native USB)
   Serial.println("ESP32-C3 Serial OK"); 
 
+  deviceId = getChipId();
   Serial.print("Device ID: ");
   Serial.println(deviceId);
 
@@ -382,7 +382,6 @@ void setup() {
   Serial.println(rawZero);
   Serial.println("HX710B ready!");
 
-  deviceId = getChipId();
   statusTopic = "devices/" + deviceId + "/status";
 
   setup_wifi();
