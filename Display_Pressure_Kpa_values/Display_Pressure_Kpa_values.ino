@@ -1,52 +1,133 @@
 #include <Arduino.h>
 #include <U8g2lib.h>
 #include <Wire.h>
+#include <HX711_ADC.h>
 
-// Pin Definitions
-#define SDA_PIN 5
-#define SCL_PIN 6
+// --------------------
+// Pin definitions
+// --------------------
+#define OLED_SDA 5
+#define OLED_SCL 6
+#define HX_DOUT 7
+#define HX_SCK 8
 
-// Display Configuration
-U8G2_SSD1306_72X40_ER_F_HW_I2C u8g2(U8G2_R0, /* reset=*/ U8X8_PIN_NONE);
+// --------------------
+// OLED setup
+// --------------------
+U8G2_SSD1306_72X40_ER_F_HW_I2C oled(U8G2_R0, U8X8_PIN_NONE);
 
+// --------------------
+// HX710B setup
+// --------------------
+HX711_ADC hxSensor(HX_DOUT, HX_SCK);
+
+// --------------------
+// Variables
+// --------------------
 unsigned long previousMillis = 0;
-const unsigned long interval = 1000; // 1 second
+const unsigned long interval = 1000; // update every 1s
+long rawZero = 0;                     // baseline at 235 m
+const float P0 = 101.3;               // sea-level reference in kPa
+const float currentAltitudeSLM = 235; // meters
 
 void setup() {
   Serial.begin(115200);
-  Wire.begin(SDA_PIN, SCL_PIN);
-  u8g2.begin();
+  Wire.begin(OLED_SDA, OLED_SCL);
+  oled.begin();
+  oled.clearBuffer();
+
+  // Initialize HX710B
+  Serial.println("Initializing HX710B...");
+  hxSensor.begin();
+  hxSensor.start(2000); // auto-zero for 2 sec
+  hxSensor.setCalFactor(1.0);
+
+  // Read baseline raw value
+  delay(2000);
+  hxSensor.update();
+  rawZero = hxSensor.getData();
+  Serial.print("Baseline raw value (284 m): ");
+  Serial.println(rawZero);
+  Serial.println("HX710B ready!");
 }
 
 void loop() {
   unsigned long currentMillis = millis();
+  hxSensor.update();
 
-  // Update random "pressure" every second
   if (currentMillis - previousMillis >= interval) {
     previousMillis = currentMillis;
 
-    int randomPressure = random(0, 40001); // 0–40 kPa * 1000 for precision
-    float pressureValue = randomPressure / 1000.0; // convert to float kPa
-    drawPressure(pressureValue);
+    // Get relative pressure
+    long raw = hxSensor.getData();
+    long delta = raw - rawZero;
+
+    // Convert to kPa
+    const float SCALE = 40.0 / 8388607.0; // ΔkPa per count
+    float pressure_kPa = P0 + delta * SCALE;
+
+    // Compute altitude relative to baseline
+    float altitude = 44330.0 * (1.0 - pow(pressure_kPa / P0, 0.1903));
+    altitude += currentAltitudeSLM; // offset for your elevation
+
+    // Serial output
+    Serial.print("Altitude: ");
+    Serial.print(altitude, 1);
+    Serial.print(" m | Pressure: ");
+    Serial.print(pressure_kPa, 2);
+    Serial.println(" kPa");
+
+    // Display on OLED
+    oled.clearBuffer();
+
+    // --------------------
+    // Line 1: altitude value + "m" (right-aligned)
+    // --------------------
+
+    // Altitude number (big font)
+    char bufAlt[10];
+    sprintf(bufAlt, "%d", (int)altitude);
+
+    oled.setFont(u8g2_font_fub20_tr);        // big font
+    int wNum = oled.getStrWidth(bufAlt);     // measure width in the same font
+
+    // Unit "m" (small font)
+    oled.setFont(u8g2_font_7x14_tr);         // small font
+    int wUnit = oled.getStrWidth(" m");      // measure width
+
+    // X position so number + "m" fit entirely
+    int xpos1 = oled.getDisplayWidth() - (wNum + wUnit);
+    if (xpos1 < 0) xpos1 = 0;               // safety
+
+    // Print altitude number
+    oled.setFont(u8g2_font_fub20_tr);
+    oled.setCursor(xpos1, 20);               // Y baseline
+    oled.print(bufAlt);
+
+    // Print small unit "m" immediately after
+    oled.setFont(u8g2_font_7x14_tr);
+    oled.setCursor(xpos1 + wNum, 20);
+    oled.print(" m");
+
+    // --------------------
+    // Line 2: pressure value (right-aligned)
+    // --------------------
+
+    char bufP[16];
+    sprintf(bufP, "%.1f kPa", pressure_kPa);
+
+    // Set font before measuring
+    oled.setFont(u8g2_font_7x14_tr);
+    int wP = oled.getStrWidth(bufP);         // width in same font
+
+    // X position for right alignment
+    int xpos2 = oled.getDisplayWidth() - wP;
+    if (xpos2 < 0) xpos2 = 0;               // safety
+
+    oled.setCursor(xpos2, 40);               // Y baseline
+    oled.print(bufP);
+
+
+    oled.sendBuffer();
   }
-}
-
-void drawPressure(float value) {
-  u8g2.clearBuffer();
-
-  // Choose bigger font
-  u8g2.setFont(u8g2_font_fub20_tr); // 25px height font, fits small screen width-wise
-
-  // Prepare string with 1 decimal to fit screen
-  char buf[16];
-  sprintf(buf, "%.1f", value);
-
-  // Compute string width to right-align
-  int w = u8g2.getStrWidth(buf);
-  int xpos = u8g2.getDisplayWidth() - w;
-  int ypos = 30; // vertical position, adjust for font size
-
-  u8g2.setCursor(xpos, ypos);
-  u8g2.print(buf);
-  u8g2.sendBuffer();
 }
